@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Best Game of the Season — MLB performance deltas</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="viz-root">
+
+<header class="masthead">
+  <div>
+    <h1>Best game of the season</h1>
+    <p class="subtitle" id="subtitle">Who plays over their head against a given opponent — measured in runs above their own norm.</p>
+  </div>
+  <div class="masthead-meta" id="meta-line"></div>
+</header>
+
+<main>
+  <section class="panel" id="team-panel">
+    <div class="controls" role="group" aria-label="Filters">
+      <label class="control">
+        <span>Opponent</span>
+        <select id="team-select"></select>
+      </label>
+      <label class="control">
+        <span>Delta measure</span>
+        <select id="metric-select">
+          <option value="total">Total runs above own norm</option>
+          <option value="per_game">Per game</option>
+          <option value="rate">Rate (per PA / per 9 IP)</option>
+        </select>
+      </label>
+      <label class="control">
+        <span>Show</span>
+        <select id="limit-select">
+          <option value="5">Top 5</option>
+          <option value="10" selected>Top 10</option>
+          <option value="25">Top 25</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="tabs" role="tablist" aria-label="Side">
+      <button class="tab is-active" role="tab" data-side="batting" aria-selected="true">Batters</button>
+      <button class="tab" role="tab" data-side="pitching" aria-selected="false">Pitchers</button>
+    </div>
+
+    <figure class="figure">
+      <figcaption>
+        <h2 id="chart-title">Biggest deltas</h2>
+        <p class="caption" id="chart-caption"></p>
+      </figcaption>
+      <div class="chart-key" aria-hidden="true">
+        <span><i class="swatch swatch-pos"></i> above own norm</span>
+        <span><i class="swatch swatch-neg"></i> below own norm</span>
+      </div>
+      <div class="chart-wrap"><svg id="delta-chart" role="img" aria-label="Delta chart"></svg></div>
+    </figure>
+
+    <div class="table-wrap">
+      <table id="delta-table">
+        <caption class="visually-hidden">Table view of the chart above</caption>
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <details class="best-games">
+      <summary>Season-best games recorded against this opponent</summary>
+      <div class="table-wrap"><table id="best-games-table"><thead></thead><tbody></tbody></table></div>
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>Leaderboard — biggest deltas in the league</h2>
+    <div class="tabs" role="tablist" aria-label="Leaderboard side">
+      <button class="tab is-active" role="tab" data-board="overall" aria-selected="true">Overall</button>
+      <button class="tab" role="tab" data-board="batting" aria-selected="false">Batters</button>
+      <button class="tab" role="tab" data-board="pitching" aria-selected="false">Pitchers</button>
+    </div>
+    <div class="table-wrap">
+      <table id="leaderboard-table"><thead></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Teams that opponents saved their best game for</h2>
+    <p class="caption">Every qualified player's single best game of the season is attributed to the team they faced. Higher is worse for the defending team.</p>
+    <div class="table-wrap">
+      <table id="counts-table"><thead></thead><tbody></tbody></table>
+    </div>
+  </section>
+</main>
+
+<div class="drawer" id="drawer" hidden>
+  <div class="drawer-inner">
+    <button class="drawer-close" id="drawer-close" aria-label="Close">&times;</button>
+    <div id="drawer-body"></div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

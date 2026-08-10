@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Ingested data and the on-disk API cache are rebuildable; keep them out of git.
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
