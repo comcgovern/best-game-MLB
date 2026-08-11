@@ -104,6 +104,24 @@ class ApiTests(unittest.TestCase):
             self.get("/static/../../../../etc/passwd")
         self.assertEqual(caught.exception.code, 404)
 
+    def test_the_pitching_side_defaults_to_starters(self):
+        team_id = self.get_json("/api/meta")["teams"][0]["team_id"]
+        report = self.get_json(f"/api/team?team_id={team_id}")
+        self.assertEqual(report["role"], "starters")
+        self.assertEqual(self.get_json("/api/meta")["default_role"], "starters")
+
+    def test_role_can_be_widened_and_bad_values_fall_back(self):
+        team_id = self.get_json("/api/meta")["teams"][0]["team_id"]
+        everything = self.get_json(f"/api/team?team_id={team_id}&role=all")
+        self.assertEqual(everything["role"], "all")
+        self.assertGreaterEqual(
+            everything["qualified"]["pitchers"],
+            self.get_json(f"/api/team?team_id={team_id}")["qualified"]["pitchers"],
+        )
+        self.assertEqual(
+            self.get_json(f"/api/team?team_id={team_id}&role=bogus")["role"], "starters"
+        )
+
     def test_asking_for_an_old_season_does_not_pin_later_requests(self):
         """The cache is per-season; a stale one must not become the default."""
         conn = db.connect(self.db_path)

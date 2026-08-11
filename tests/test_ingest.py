@@ -134,6 +134,39 @@ class BoxscoreParsingTests(unittest.TestCase):
         self.assertEqual(reliever["outs"], 3)
         self.assertEqual(reliever["is_start"], 0)
 
+    def test_the_appearance_order_backs_up_the_start_flag(self):
+        """Everything downstream filters on is_start, so it must not go blank
+        if gamesStarted ever drops out of the payload."""
+        stripped = {
+            "teams": {
+                "home": {
+                    "team": {"id": 147},
+                    "pitchers": [543037, 999001],
+                    "players": {
+                        "ID543037": {
+                            "person": {"id": 543037, "fullName": "Front End Starter"},
+                            "stats": {"pitching": {"outs": 18, "battersFaced": 24}},
+                        },
+                        "ID999001": {
+                            "person": {"id": 999001, "fullName": "Late Inning Arm"},
+                            "stats": {"pitching": {"outs": 3, "battersFaced": 3}},
+                        },
+                    },
+                },
+                "away": {"team": {"id": 111}, "players": {}},
+            }
+        }
+        _, pitching, _ = parse_boxscore(stripped, GAME)
+        starts = {l["player_id"]: l["is_start"] for l in pitching}
+        self.assertEqual(starts[543037], 1, "first pitcher listed is the starter")
+        self.assertEqual(starts[999001], 0)
+
+    def test_the_start_flag_still_wins_when_present(self):
+        starter = next(l for l in self.pitching if l["player_id"] == 543037)
+        self.assertEqual(starter["is_start"], 1)
+        reliever = next(l for l in self.pitching if l["player_id"] == 646240)
+        self.assertEqual(reliever["is_start"], 0)
+
     def test_player_names_are_collected(self):
         names = {p["player_id"]: p["name"] for p in self.players}
         self.assertEqual(names[592450], "Slugging Outfielder")

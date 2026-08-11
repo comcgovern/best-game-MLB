@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import analytics, db
 from .config import DEFAULT_DB_PATH, Thresholds
-from .analytics import METRICS, SeasonData
+from .analytics import DEFAULT_ROLE, METRICS, ROLES, SeasonData
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +132,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         metric = _first(params, "metric", "total")
         if metric not in METRICS:
             metric = "total"
+        role = _first(params, "role", DEFAULT_ROLE)
+        if role not in ROLES:
+            role = DEFAULT_ROLE
         limit = max(1, min(_first_int(params, "limit", 10) or 10, 200))
 
         if route == "/api/meta":
@@ -140,7 +143,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "season": data.season,
-                    "rows": analytics.best_game_counts(data, self.thresholds),
+                    "role": role,
+                    "rows": analytics.best_game_counts(data, self.thresholds, role),
                 }
             )
         elif route == "/api/team":
@@ -149,7 +153,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "team_id required"}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(
-                analytics.team_report(data, team_id, metric, limit, self.thresholds)
+                analytics.team_report(
+                    data, team_id, metric, limit, self.thresholds, role
+                )
             )
         elif route == "/api/leaderboard":
             side = _first(params, "side", "overall")
@@ -161,8 +167,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "side": side,
                     "metric": metric,
                     "metric_label": METRICS[metric],
+                    "role": role,
+                    "role_label": ROLES[role],
                     "rows": analytics.leaderboard(
-                        data, side, metric, limit, self.thresholds
+                        data, side, metric, limit, self.thresholds, role
                     ),
                 }
             )
@@ -176,7 +184,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 analytics.player_detail(
-                    data, player_id, side, _first_int(params, "team_id")
+                    data, player_id, side, _first_int(params, "team_id"), role
                 )
             )
         else:
@@ -191,6 +199,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "season": data.season,
             "league": data.context.as_dict(),
             "metrics": METRICS,
+            "roles": ROLES,
+            "default_role": DEFAULT_ROLE,
             "thresholds": {
                 "min_season_pa": self.thresholds.min_season_pa,
                 "min_season_outs": self.thresholds.min_season_outs,

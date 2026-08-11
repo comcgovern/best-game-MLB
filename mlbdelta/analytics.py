@@ -29,12 +29,25 @@ from .scoring import (
 
 Side = Literal["batting", "pitching"]
 Metric = Literal["total", "per_game", "rate"]
+PitcherRole = Literal["starters", "all", "relievers"]
 
 METRICS: dict[Metric, str] = {
     "total": "Total runs above own norm",
     "per_game": "Runs above own norm per game",
     "rate": "Rate delta (per PA / per 9 IP)",
 }
+
+ROLES: dict[PitcherRole, str] = {
+    "starters": "Starting pitchers only",
+    "all": "All pitchers",
+    "relievers": "Relievers only",
+}
+
+# Relief appearances are short and wildly variable, so mixing them with starts
+# lets a handful of clean innings outrank a season of real work — and worse,
+# they land in the baseline too, comparing a start against a club with relief
+# outings against everyone else. Starts-versus-starts is the honest comparison.
+DEFAULT_ROLE: PitcherRole = "starters"
 
 
 @dataclass
@@ -47,9 +60,20 @@ class SeasonData:
     players: dict[int, str]
     batting: list[dict] = field(default_factory=list)
     pitching: list[dict] = field(default_factory=list)
+    _by_role: dict[PitcherRole, list[dict]] = field(default_factory=dict, repr=False)
 
-    def lines(self, side: Side) -> list[dict]:
-        return self.batting if side == "batting" else self.pitching
+    def lines(self, side: Side, role: PitcherRole = "all") -> list[dict]:
+        """Game lines for one side, optionally narrowed to a pitching role."""
+        if side == "batting":
+            return self.batting
+        if role == "all":
+            return self.pitching
+        if role not in self._by_role:
+            want_start = role == "starters"
+            self._by_role[role] = [
+                line for line in self.pitching if bool(line["is_start"]) is want_start
+            ]
+        return self._by_role[role]
 
     def team_name(self, team_id: int) -> str:
         team = self.teams.get(team_id)
@@ -196,11 +220,17 @@ def player_opponent_deltas(
     side: Side,
     opp_team_id: int | None = None,
     thresholds: Thresholds = Thresholds(),
+    role: PitcherRole = DEFAULT_ROLE,
 ) -> list[dict]:
-    """One row per (player, opponent) pair that clears the sample thresholds."""
+    """One row per (player, opponent) pair that clears the sample thresholds.
+
+    ``role`` narrows the pitching side. It filters the lines *before* anything
+    is aggregated, so both the performance against the club and the baseline it
+    is measured against are built from the same kind of appearance.
+    """
     rows: list[dict] = []
 
-    for player_id, lines in _group_by_player(data.lines(side)).items():
+    for player_id, lines in _group_by_player(data.lines(side, role)).items():
         season_games, season_score, season_workload = _totals(lines)
         if not _season_qualified(side, season_workload, thresholds):
             continue
@@ -298,6 +328,7 @@ def best_game_attributions(
     data: SeasonData,
     side: Side,
     thresholds: Thresholds = Thresholds(),
+    role: PitcherRole = DEFAULT_ROLE,
 ) -> list[dict]:
     """For every qualified player, the opponent they had their best game against.
 
@@ -306,7 +337,7 @@ def best_game_attributions(
     """
     attributions: list[dict] = []
 
-    for player_id, lines in _group_by_player(data.lines(side)).items():
+    for player_id, lines in _group_by_player(data.lines(side, role)).items():
         _, _, season_workload = _totals(lines)
         if not _season_qualified(side, season_workload, thresholds):
             continue
@@ -340,6 +371,7 @@ def best_game_attributions(
 def best_game_counts(
     data: SeasonData,
     thresholds: Thresholds = Thresholds(),
+    role: PitcherRole = DEFAULT_ROLE,
 ) -> list[dict]:
     """How many players had their single best game of the season vs each team."""
     counts: dict[int, dict] = {
@@ -356,7 +388,7 @@ def best_game_counts(
 
     for side in ("batting", "pitching"):
         bucket = "batters" if side == "batting" else "pitchers"
-        for attribution in best_game_attributions(data, side, thresholds):
+        for attribution in best_game_attributions(data, side, thresholds, role):
             entry = counts.setdefault(
                 attribution["opp_team_id"],
                 {
@@ -389,17 +421,20 @@ def team_report(
     metric: Metric = "total",
     limit: int = 10,
     thresholds: Thresholds = Thresholds(),
+    role: PitcherRole = DEFAULT_ROLE,
 ) -> dict:
     """Everything the dashboard shows for one selected opponent."""
     batting_rows = player_opponent_deltas(data, "batting", opp_team_id, thresholds)
-    pitching_rows = player_opponent_deltas(data, "pitching", opp_team_id, thresholds)
+    pitching_rows = player_opponent_deltas(
+        data, "pitching", opp_team_id, thresholds, role
+    )
 
     counts = {"batters": 0, "pitchers": 0}
     best_games = {"batting": [], "pitching": []}
     for side, bucket in (("batting", "batters"), ("pitching", "pitchers")):
         attributions = [
             a
-            for a in best_game_attributions(data, side, thresholds)
+            for a in best_game_attributions(data, side, thresholds, role)
             if a["opp_team_id"] == opp_team_id
         ]
         counts[bucket] = len(attributions)
@@ -413,6 +448,8 @@ def team_report(
         "team": data.team_name(opp_team_id),
         "metric": metric,
         "metric_label": METRICS[metric],
+        "role": role,
+        "role_label": ROLES[role],
         "limit": limit,
         "best_game_counts": {**counts, "total": counts["batters"] + counts["pitchers"]},
         "batters": rank(batting_rows, metric, limit),
@@ -428,13 +465,14 @@ def leaderboard(
     metric: Metric = "total",
     limit: int = 25,
     thresholds: Thresholds = Thresholds(),
+    role: PitcherRole = DEFAULT_ROLE,
 ) -> list[dict]:
     """Biggest player-vs-team deltas anywhere in the league."""
     rows: list[dict] = []
     if side in ("overall", "batting"):
         rows += player_opponent_deltas(data, "batting", None, thresholds)
     if side in ("overall", "pitching"):
-        rows += player_opponent_deltas(data, "pitching", None, thresholds)
+        rows += player_opponent_deltas(data, "pitching", None, thresholds, role)
     return rank(rows, metric, limit)
 
 
@@ -443,9 +481,15 @@ def player_detail(
     player_id: int,
     side: Side,
     opp_team_id: int | None = None,
+    role: PitcherRole = DEFAULT_ROLE,
 ) -> dict:
-    """Game log for one player, optionally highlighting one opponent."""
-    lines = [l for l in data.lines(side) if l["player_id"] == player_id]
+    """Game log for one player, optionally highlighting one opponent.
+
+    The log honours ``role`` so its season total reconciles with the delta the
+    player was ranked on — a log showing relief outings the ranking ignored
+    would not add up.
+    """
+    lines = [l for l in data.lines(side, role) if l["player_id"] == player_id]
     lines.sort(key=lambda l: (l["date"], l["game_pk"]))
     games = [_game_view(data, side, line) for line in lines]
 
@@ -461,6 +505,7 @@ def player_detail(
         "player_id": player_id,
         "player": data.player_name(player_id),
         "side": side,
+        "role": role if side == "pitching" else "all",
         "season": data.season,
         "games": games,
         "season_score": round(total, 3),

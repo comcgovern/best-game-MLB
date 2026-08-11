@@ -95,11 +95,31 @@ Three ways of asking the question, switchable in the UI and on the CLI:
 | `per_game` | the same, per game | who plays the biggest above themselves |
 | `rate` | per plate appearance (batters) / per nine innings (pitchers) | comparing players with unequal playing time |
 
-Two notes on `rate`. Batters are measured per PA and pitchers per nine innings,
+One note on `rate`: batters are measured per PA and pitchers per nine innings,
 so the two sides are *not* comparable to each other in this mode — the tiles
-label the unit for that reason. And relievers dominate the pitching rate board:
-ten scoreless one-inning outings really is a huge runs-per-nine figure, so the
-number is right, but it is built on ten innings. `total` is the steadier read.
+label the unit for that reason.
+
+### Starting pitchers only, by default
+
+The pitching side counts starts and ignores relief appearances. A relief outing
+is short and wildly variable, so mixing the two lets a handful of clean innings
+outrank a season of real work — and worse, the relief outings land in the
+*baseline* too, which measures a start against one club by the standard of
+relief work against everyone else.
+
+The filter applies before anything is aggregated, so a pitcher's starts against
+a club are compared with his starts against the rest of the league. It changes
+the picture sharply: on a demo season the pitching rate board went from a wall
+of `1.0 IP, 0 R` cameos at +6.0 runs/9 to real starts at +4.0.
+
+`Pitchers: All` or `--pitchers all` puts relief work back in, and `relievers`
+inverts the filter. Whichever is selected, the game log in the player drawer
+uses the same filter, so its season total reconciles with the ranking.
+
+`is_start` comes from the box score's `gamesStarted`, with the pitching
+appearance order as a fallback — its first entry is the starter. Without that
+second signal, a change to the payload could quietly read every appearance as
+relief and empty the board.
 
 ### Best game of the season
 
@@ -117,7 +137,7 @@ Defaults, all configurable:
 | | Batters | Pitchers |
 |---|---|---|
 | Season minimum | 50 PA | 30 outs (10 IP) |
-| Vs. the selected opponent | 3 games, 8 PA | 2 games, 15 outs |
+| Vs. the selected opponent | 3 games, 8 PA | 2 starts, 15 outs |
 
 The two sides need different bars. A regular sees a division rival a dozen-plus
 times, but a starting pitcher may face a given club only twice all year — a
@@ -131,7 +151,7 @@ tally, which is the right home for a one-off gem.
 
 `python -m mlbdelta serve [--port 8000] [--db data/mlb.sqlite3]`
 
-- Opponent, metric and top-N pickers across the top
+- Opponent, metric, pitcher-role and top-N pickers across the top
 - Headline tiles: how many batters and pitchers had their best game against
   this club
 - A diverging bar chart of the biggest deltas, batters or pitchers, with the
@@ -149,10 +169,12 @@ plus a JSON API — no CDN, no build step.
 | Endpoint | Returns |
 |---|---|
 | `GET /api/meta` | season, teams, league constants, thresholds, row counts |
-| `GET /api/team?team_id=&metric=&limit=` | full report for one opponent |
-| `GET /api/leaderboard?side=overall\|batting\|pitching&metric=&limit=` | league-wide deltas |
-| `GET /api/best-game-counts` | season-best games attributed to each club |
-| `GET /api/player?player_id=&side=&team_id=` | one player's game log |
+| `GET /api/team?team_id=&metric=&role=&limit=` | full report for one opponent |
+| `GET /api/leaderboard?side=overall\|batting\|pitching&metric=&role=&limit=` | league-wide deltas |
+| `GET /api/best-game-counts?role=` | season-best games attributed to each club |
+| `GET /api/player?player_id=&side=&team_id=&role=` | one player's game log |
+
+`role` is `starters` (the default), `all` or `relievers`.
 
 ---
 
@@ -165,7 +187,7 @@ python -m mlbdelta [--db PATH] <command>
            [--sleep 0.1] [--limit N]
   demo     [--season 2026] [--days 162] [--seed N]
   report   [--team NYY|147|"New York Yankees"] [--metric total|per_game|rate]
-           [--top 10] [--min-games 3]
+           [--pitchers starters|all|relievers] [--top 10] [--min-games 3]
   serve    [--host 127.0.0.1] [--port 8000]
 ```
 
@@ -188,7 +210,7 @@ mlbdelta/
   server.py     JSON API + static file serving
   demo.py       the fictional season
   static/       the dashboard
-tests/          70 tests, standard-library unittest
+tests/          80 tests, standard-library unittest
 ```
 
 ```bash

@@ -140,6 +140,62 @@ class DeltaTests(unittest.TestCase):
         self.assertGreater(ranked[0]["delta_total"], 0)
 
 
+class PitcherRoleTests(unittest.TestCase):
+    """Relief work must leave both sides of the comparison, or neither."""
+
+    def setUp(self):
+        # A swingman: six starts against club 3 and two against club 2, plus
+        # tidy one-inning relief outings against both.
+        rows = [pitching_row(g, 20, 3, is_start=1, outs=18, r=4) for g in range(1, 7)]
+        rows += [pitching_row(g, 20, 2, is_start=1, outs=18, r=2) for g in (7, 8)]
+        rows += [pitching_row(g, 20, 2, is_start=0, outs=3, r=0) for g in range(9, 15)]
+        rows += [pitching_row(g, 20, 3, is_start=0, outs=3, r=0) for g in range(15, 19)]
+        self.data = load_season(build_db(pitching=rows), 2026)
+
+    def test_starters_only_is_the_default(self):
+        [row] = player_opponent_deltas(self.data, "pitching", 2, LOOSE)
+        self.assertEqual(row["games_vs"], 2, "relief outings should not be counted")
+        self.assertAlmostEqual(row["workload_vs"], 36 / 27, places=2)
+        self.assertEqual(row["baseline_games"], 6, "baseline is starts only")
+
+    def test_relief_outings_flatter_the_unfiltered_view(self):
+        """Short scoreless innings inflate a rate built on nine-inning units."""
+        [starters] = player_opponent_deltas(self.data, "pitching", 2, LOOSE)
+        [everything] = player_opponent_deltas(self.data, "pitching", 2, LOOSE, "all")
+        self.assertEqual(everything["games_vs"], 8)
+        self.assertGreater(everything["rate_vs"], starters["rate_vs"])
+
+    def test_all_and_relievers_are_still_reachable(self):
+        [everything] = player_opponent_deltas(self.data, "pitching", 2, LOOSE, "all")
+        self.assertEqual(everything["games_vs"], 8)
+        [relief] = player_opponent_deltas(self.data, "pitching", 2, LOOSE, "relievers")
+        self.assertEqual(relief["games_vs"], 6)
+        self.assertEqual(relief["baseline_games"], 4)
+
+    def test_batters_are_untouched_by_the_role_filter(self):
+        rows = [batting_row(g, 10, 2, h=2, hr=1) for g in range(1, 5)]
+        rows += [batting_row(g, 10, 3) for g in range(5, 15)]
+        data = load_season(build_db(batting=rows), 2026)
+        for role in ("starters", "all", "relievers"):
+            [row] = player_opponent_deltas(data, "batting", 2, LOOSE, role)
+            self.assertEqual(row["games_vs"], 4, role)
+
+    def test_best_game_counts_follow_the_role(self):
+        counts = {r["team_id"]: r for r in best_game_counts(self.data, LOOSE)}
+        self.assertEqual(counts[2]["pitchers"], 1, "best start came against club 2")
+        relief = {r["team_id"]: r
+                  for r in best_game_counts(self.data, LOOSE, "relievers")}
+        self.assertEqual(relief[2]["pitchers"], 1)
+
+    def test_the_game_log_reconciles_with_the_ranking(self):
+        [row] = player_opponent_deltas(self.data, "pitching", 2, LOOSE)
+        detail = analytics.player_detail(self.data, 20, "pitching", 2)
+        self.assertEqual(len(detail["games"]), 8, "starts only")
+        self.assertEqual(detail["role"], "starters")
+        vs_two = [g["score"] for g in detail["games"] if g["opp_team_id"] == 2]
+        self.assertAlmostEqual(sum(vs_two), row["score_vs"], places=2)
+
+
 class BestGameTests(unittest.TestCase):
     def test_best_game_is_attributed_to_the_opponent_faced(self):
         rows = [batting_row(1, 10, 2, h=4, hr=3)]  # the season's best night

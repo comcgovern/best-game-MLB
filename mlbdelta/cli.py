@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import analytics, db, demo, ingest, server
+from .analytics import DEFAULT_ROLE
 from .config import DEFAULT_DB_PATH, DEFAULT_GAME_TYPES, Thresholds, current_season
 from .statsapi import StatsApiClient
 
@@ -97,8 +98,10 @@ def cmd_report(args) -> int:
         if team_id is None:
             print(f"no team matching {args.team!r}", file=sys.stderr)
             return 1
-        report = analytics.team_report(data, team_id, args.metric, args.top, thresholds)
-        print(f"\n{report['team']} — {data.season}")
+        report = analytics.team_report(
+            data, team_id, args.metric, args.top, thresholds, args.pitchers
+        )
+        print(f"\n{report['team']} — {data.season}  ({report['role_label'].lower()})")
         print(f"  season-best games allowed: {report['best_game_counts']['batters']} batters, "
               f"{report['best_game_counts']['pitchers']} pitchers")
         for label, rows in (("BATTERS", report["batters"]), ("PITCHERS", report["pitchers"])):
@@ -108,11 +111,13 @@ def cmd_report(args) -> int:
         print(f"\nLeague leaderboard — {data.season}")
         for side in ("batting", "pitching"):
             print(f"\n  {side.upper()}")
-            _print_rows(analytics.leaderboard(data, side, args.metric, args.top, thresholds))
+            _print_rows(analytics.leaderboard(
+                data, side, args.metric, args.top, thresholds, args.pitchers
+            ))
 
         print("\n  SEASON-BEST GAMES ALLOWED, BY TEAM")
         print(f"  {'Team':<26}{'Bat':>5}{'Pit':>5}{'Tot':>6}")
-        for row in analytics.best_game_counts(data, thresholds)[: args.top]:
+        for row in analytics.best_game_counts(data, thresholds, args.pitchers)[: args.top]:
             print(f"  {row['team']:<26}{row['batters']:>5}{row['pitchers']:>5}{row['total']:>6}")
     print()
     return 0
@@ -190,6 +195,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--top", type=int, default=10)
     p_report.add_argument("--min-games", type=int, default=Thresholds().min_games_vs_opponent)
     p_report.add_argument("--min-season-pa", type=int, default=Thresholds().min_season_pa)
+    p_report.add_argument("--pitchers", default=DEFAULT_ROLE,
+                          choices=["starters", "all", "relievers"],
+                          help="which pitching appearances to count (default: starters)")
     p_report.set_defaults(func=cmd_report)
 
     p_serve = sub.add_parser("serve", help="run the dashboard")

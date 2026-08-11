@@ -91,6 +91,13 @@ def parse_boxscore(boxscore: dict, game: dict) -> tuple[list[dict], list[dict], 
             "is_home": 1 if side == "home" else 0,
         }
 
+        # `pitchers` lists the staff in the order they appeared, so its first
+        # entry is the starter. Kept as a fallback: everything downstream can
+        # filter to starters, and if gamesStarted ever goes missing from the
+        # payload the whole pitching side would silently read as relief work.
+        appearance_order = side_data.get("pitchers") or []
+        first_pitcher = appearance_order[0] if appearance_order else None
+
         for player in (side_data.get("players") or {}).values():
             person = player.get("person") or {}
             player_id = person.get("id")
@@ -134,7 +141,9 @@ def parse_boxscore(boxscore: dict, game: dict) -> tuple[list[dict], list[dict], 
                     {
                         **common,
                         "player_id": player_id,
-                        "is_start": 1 if _int(pit, "gamesStarted") else 0,
+                        "is_start": 1
+                        if (_int(pit, "gamesStarted") or player_id == first_pitcher)
+                        else 0,
                         "outs": outs,
                         "bf": batters_faced,
                         "h": _int(pit, "hits"),

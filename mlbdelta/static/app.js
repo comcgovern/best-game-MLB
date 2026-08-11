@@ -6,6 +6,7 @@
     meta: null,
     teamId: null,
     metric: "total",
+    role: "starters",
     limit: 10,
     side: "batting",
     board: "overall",
@@ -228,7 +229,8 @@
 
   function openPlayer(row) {
     hideTooltip();
-    api("/api/player", { player_id: row.player_id, side: row.side, team_id: row.opp_team_id })
+    api("/api/player", { player_id: row.player_id, side: row.side,
+                        team_id: row.opp_team_id, role: state.role })
       .then((detail) => {
         const body = $("drawer-body");
         const rows = detail.games
@@ -254,13 +256,23 @@
 
   // ------------------------------------------------------------------ render
 
+  // What the pitching half of the page is counting depends on the role filter.
+  const pitcherNoun = (plural) => {
+    const nouns = { starters: ["starter", "starters"], relievers: ["reliever", "relievers"],
+                    all: ["pitcher", "pitchers"] };
+    return (nouns[state.role] || nouns.all)[plural ? 1 : 0];
+  };
+  const pitcherOuting = () => (state.role === "starters" ? "start" : "game");
+  const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
   function renderTiles(report) {
     const counts = report.best_game_counts;
     const tiles = [
       { label: `Batters whose best game was vs ${report.team}`, value: counts.batters,
         note: `of ${report.qualified.batters} qualified opponents' batters` },
-      { label: `Pitchers whose best game was vs ${report.team}`, value: counts.pitchers,
-        note: `of ${report.qualified.pitchers} qualified opponents' pitchers` },
+      { label: `${cap(pitcherNoun(true))} whose best ${pitcherOuting()} was vs ${report.team}`,
+        value: counts.pitchers,
+        note: `of ${report.qualified.pitchers} qualified opponents' ${pitcherNoun(true)}` },
       { label: "Combined", value: counts.total, note: "season-best games surrendered" },
       // Batters and pitchers are only on the same scale for total and
       // per-game; in rate mode one is runs/PA and the other runs/9 IP, so the
@@ -269,7 +281,7 @@
         note: report.batters.length
           ? `${report.batters[0].player} · ${metricUnit("batting")}`
           : "no qualifiers" },
-      { label: "Top pitcher delta", value: report.pitchers.length ? fmt(report.pitchers[0].metric_value) : "—",
+      { label: `Top ${pitcherNoun(false)} delta`, value: report.pitchers.length ? fmt(report.pitchers[0].metric_value) : "—",
         note: report.pitchers.length
           ? `${report.pitchers[0].player} · ${metricUnit("pitching")}`
           : "no qualifiers" },
@@ -284,14 +296,16 @@
     const report = state.report;
     if (!report) return;
     const rows = state.side === "batting" ? report.batters : report.pitchers;
-    const label = state.side === "batting" ? "batters" : "pitchers";
+    const label = state.side === "batting" ? "batters" : pitcherNoun(true);
 
     renderTiles(report);
     $("chart-title").textContent =
       `Top ${rows.length} ${label} against ${report.team}`;
+    const scope = state.side === "pitching" && state.role !== "all"
+      ? ` Only ${pitcherNoun(true)} count, on both sides of the comparison.` : "";
     $("chart-caption").textContent =
       `${report.metric_label} — performance against ${report.team} minus the same player's ` +
-      `average against every other team, in ${metricUnit(state.side)}.`;
+      `average against every other team, in ${metricUnit(state.side)}.${scope}`;
     drawChart(rows, state.side);
     renderTable($("delta-table"), deltaColumns(state.side), rows, openPlayer);
 
@@ -308,19 +322,21 @@
 
   function loadTeam() {
     if (state.teamId === null) return;
-    api("/api/team", { team_id: state.teamId, metric: state.metric, limit: state.limit })
+    api("/api/team", { team_id: state.teamId, metric: state.metric,
+                      role: state.role, limit: state.limit })
       .then((report) => { state.report = report; renderReport(); });
   }
 
   function loadLeaderboard() {
-    api("/api/leaderboard", { side: state.board, metric: state.metric, limit: state.limit })
+    api("/api/leaderboard", { side: state.board, metric: state.metric,
+                             role: state.role, limit: state.limit })
       .then((payload) => {
         renderTable($("leaderboard-table"), leaderboardColumns(), payload.rows, openPlayer);
       });
   }
 
   function loadCounts() {
-    api("/api/best-game-counts").then((payload) => {
+    api("/api/best-game-counts", { role: state.role }).then((payload) => {
       renderTable($("counts-table"), [
         { label: "Team", cell: (r) => esc(r.team) },
         { label: "Batters", num: true, cell: (r) => r.batters },
@@ -346,6 +362,14 @@
       state.metric = e.target.value;
       loadTeam();
       loadLeaderboard();
+    });
+    $("role-select").addEventListener("change", (e) => {
+      state.role = e.target.value;
+      document.querySelector(".tab[data-side='pitching']").textContent =
+        cap(pitcherNoun(true));
+      loadTeam();
+      loadLeaderboard();
+      loadCounts();
     });
     $("limit-select").addEventListener("change", (e) => {
       state.limit = Number(e.target.value);
@@ -410,6 +434,8 @@
       .join("");
     state.teamId = meta.teams[0].team_id;
     wire();
+    document.querySelector(".tab[data-side='pitching']").textContent =
+      cap(pitcherNoun(true));
     loadTeam();
     loadLeaderboard();
     loadCounts();
