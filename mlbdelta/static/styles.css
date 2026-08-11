@@ -138,7 +138,7 @@ table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--text-secondary); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-tbody tr { cursor: pointer; }
+tbody tr.clickable { cursor: pointer; }
 tbody tr:hover { background: var(--surface-2); }
 .pos { color: var(--pos); }
 .neg { color: var(--neg); }

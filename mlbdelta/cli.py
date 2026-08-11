@@ -134,7 +134,9 @@ def _print_rows(rows) -> None:
 def _resolve_team(data, needle: str):
     needle = needle.strip().lower()
     if needle.isdigit():
-        return int(needle)
+        # Only accept an id that is actually in the data, so a typo reports
+        # "no team matching 1470" instead of an empty report.
+        return int(needle) if int(needle) in data.teams else None
     for team_id, team in data.teams.items():
         if needle in (str(team.get("abbrev", "")).lower(), team["name"].lower()):
             return team_id

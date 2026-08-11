@@ -79,6 +79,8 @@ class StatsApiClient:
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
 
+            if attempt == self.max_retries - 1:
+                break  # no point sleeping before giving up
             backoff = (2**attempt) + random.uniform(0, 0.5)
             log.warning("retrying %s in %.1fs (%s)", url, backoff, last_error)
             time.sleep(backoff)
@@ -144,3 +146,13 @@ class StatsApiClient:
     def boxscore(self, game_pk: int) -> dict:
         """Box score for one game. Cached on disk — final games never change."""
         return self._cached_get("boxscore", game_pk, f"game/{game_pk}/boxscore")
+
+    def forget_boxscore(self, game_pk: int) -> None:
+        """Drop a cached box score so the next run fetches it again.
+
+        Used when a response parses to nothing: caching that would make the
+        empty result permanent.
+        """
+        cache_path = self._cache_path("boxscore", game_pk)
+        if cache_path:
+            cache_path.unlink(missing_ok=True)

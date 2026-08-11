@@ -156,8 +156,8 @@
     tip.innerHTML =
       `<div class="t-title">${esc(row.player)} <span class="badge">${esc(row.team_abbrev)}</span></div>` +
       `<div class="t-row">${fmt(row.metric_value)} ${metricUnit(side)} vs ${esc(row.opponent)}</div>` +
-      `<div class="t-row">${row.games_vs} games · ${fmt(row.per_game_vs)} per game vs them, ` +
-      `${fmt(row.baseline_per_game)} vs everyone else</div>` +
+      `<div class="t-row">${row.games_vs} games · ${fmt(row.per_game_vs, 2)} per game vs them, ` +
+      `${fmt(row.baseline_per_game, 2)} vs everyone else</div>` +
       `<div class="t-row">Best: ${esc(row.best_game.summary)} (${row.best_game.date})</div>`;
     const pad = 14;
     const rect = tip.getBoundingClientRect();
@@ -184,7 +184,7 @@
     }
     body.innerHTML = rows
       .map((row, i) =>
-        `<tr data-index="${i}">` +
+        `<tr data-index="${i}" class="${onRowClick ? "clickable" : ""}">` +
         columns.map((c) => `<td class="${c.num ? "num" : ""}">${c.cell(row)}</td>`).join("") +
         "</tr>")
       .join("");
@@ -206,8 +206,8 @@
       { label: "Team", cell: (r) => esc(r.team_abbrev) },
       { label: "G", num: true, cell: (r) => r.games_vs },
       { label: `Δ ${metricUnit(side)}`, num: true, cell: (r) => signed(r.metric_value) },
-      { label: "Vs them /g", num: true, cell: (r) => fmt(r.per_game_vs) },
-      { label: "Baseline /g", num: true, cell: (r) => fmt(r.baseline_per_game) },
+      { label: "Vs them /g", num: true, cell: (r) => fmt(r.per_game_vs, 2) },
+      { label: "Baseline /g", num: true, cell: (r) => fmt(r.baseline_per_game, 2) },
       { label: "Best game vs them", cell: (r) => `${esc(r.best_game.summary)} <span class="badge">${esc(r.best_game.date)}</span>` },
     ];
   }
@@ -220,8 +220,8 @@
     { label: "Owns", cell: (r) => esc(r.opponent) },
     { label: "G", num: true, cell: (r) => r.games_vs },
     { label: "Δ", num: true, cell: (r) => signed(r.metric_value) },
-    { label: "Vs them /g", num: true, cell: (r) => fmt(r.per_game_vs) },
-    { label: "Baseline /g", num: true, cell: (r) => fmt(r.baseline_per_game) },
+    { label: "Vs them /g", num: true, cell: (r) => fmt(r.per_game_vs, 2) },
+    { label: "Baseline /g", num: true, cell: (r) => fmt(r.baseline_per_game, 2) },
   ];
 
   // ------------------------------------------------------------------ drawer
@@ -238,14 +238,14 @@
             return `<tr class="${classes}"><td>${esc(g.date)}</td>` +
               `<td>${g.is_home ? "vs" : "@"} ${esc(g.opponent_abbrev)}</td>` +
               `<td>${esc(g.summary)}${flag}</td>` +
-              `<td class="num ${g.score >= 0 ? "pos" : "neg"}">${fmt(g.score)}</td></tr>`;
+              `<td class="num ${g.score >= 0 ? "pos" : "neg"}">${fmt(g.score, 2)}</td></tr>`;
           })
           .join("");
         body.innerHTML =
           `<h2>${esc(detail.player)}</h2>` +
           `<p class="caption">${detail.side === "batting" ? "Batting" : "Pitching"} game log, ${detail.season}. ` +
-          `Season total ${fmt(detail.season_score)} runs above average over ${detail.games.length} games ` +
-          `(${fmt(detail.season_per_game)} per game). Rows against ${esc(row.opponent)} are highlighted.</p>` +
+          `Season total ${fmt(detail.season_score, 2)} runs above average over ${detail.games.length} games ` +
+          `(${fmt(detail.season_per_game, 2)} per game). Rows against ${esc(row.opponent)} are highlighted.</p>` +
           `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Opp</th><th>Line</th>` +
           `<th class="num">Runs above avg</th></tr></thead><tbody>${rows}</tbody></table></div>`;
         $("drawer").hidden = false;
@@ -262,10 +262,17 @@
       { label: `Pitchers whose best game was vs ${report.team}`, value: counts.pitchers,
         note: `of ${report.qualified.pitchers} qualified opponents' pitchers` },
       { label: "Combined", value: counts.total, note: "season-best games surrendered" },
+      // Batters and pitchers are only on the same scale for total and
+      // per-game; in rate mode one is runs/PA and the other runs/9 IP, so the
+      // unit has to be on the tile or the two numbers invite comparison.
       { label: "Top batter delta", value: report.batters.length ? fmt(report.batters[0].metric_value) : "—",
-        note: report.batters.length ? report.batters[0].player : "no qualifiers" },
+        note: report.batters.length
+          ? `${report.batters[0].player} · ${metricUnit("batting")}`
+          : "no qualifiers" },
       { label: "Top pitcher delta", value: report.pitchers.length ? fmt(report.pitchers[0].metric_value) : "—",
-        note: report.pitchers.length ? report.pitchers[0].player : "no qualifiers" },
+        note: report.pitchers.length
+          ? `${report.pitchers[0].player} · ${metricUnit("pitching")}`
+          : "no qualifiers" },
     ];
     $("tiles").innerHTML = tiles
       .map((t) => `<div class="tile"><div class="label">${esc(t.label)}</div>` +
@@ -379,12 +386,18 @@
     });
   }
 
+  const showMessage = (html) => {
+    document.querySelector("main").innerHTML =
+      `<div class="panel"><p class="empty">${html}</p></div>`;
+  };
+
   api("/api/meta").then((meta) => {
     state.meta = meta;
     if (!meta.teams || !meta.teams.length) {
-      document.querySelector("main").innerHTML =
-        '<div class="panel"><p class="empty">No data yet. Run <code>python -m mlbdelta ingest</code> ' +
-        '(or <code>python -m mlbdelta demo</code>) and reload.</p></div>';
+      showMessage(
+        "No data yet. Run <code>python -m mlbdelta ingest</code> " +
+        "(or <code>python -m mlbdelta demo</code>) and reload."
+      );
       return;
     }
     $("meta-line").innerHTML =
@@ -400,5 +413,8 @@
     loadTeam();
     loadLeaderboard();
     loadCounts();
+  }).catch((error) => {
+    // Without this the page just sits there blank if the server is unreachable.
+    showMessage(`Could not reach the dashboard API: ${esc(error.message)}`);
   });
 })();

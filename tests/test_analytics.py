@@ -170,6 +170,39 @@ class BestGameTests(unittest.TestCase):
         self.assertEqual(len(attributions), 1)
         self.assertEqual(attributions[0]["opp_team_id"], 2)  # earlier game wins
 
+    def test_only_one_game_is_flagged_as_the_season_best(self):
+        """Tied scores are routine — identical relief outings score the same."""
+        rows = [pitching_row(g, 20, 2 + g % 3, outs=3, h=0, r=0, bb=0, so=1, hr=0)
+                for g in range(1, 9)]
+        data = load_season(build_db(pitching=rows), 2026)
+        detail = analytics.player_detail(data, 20, "pitching")
+        scores = {g["score"] for g in detail["games"]}
+        self.assertEqual(len(scores), 1, "fixture should be all ties")
+        self.assertEqual(sum(1 for g in detail["games"] if g["is_season_best"]), 1)
+
+    def test_ties_break_on_date_not_game_id(self):
+        """A rained-out game keeps its original low game_pk when it is replayed."""
+        rows = [
+            batting_row(900, 10, 2, h=2, hr=2, date="2026-09-20"),  # low id, late date
+            batting_row(950, 10, 3, h=2, hr=2, date="2026-04-05"),  # high id, early date
+        ]
+        rows += [batting_row(g, 10, 4) for g in range(1, 6)]
+        data = load_season(build_db(batting=rows), 2026)
+        [attribution] = best_game_attributions(data, "batting", LOOSE)
+        self.assertEqual(attribution["opp_team_id"], 3, "the April game came first")
+
+    def test_the_club_shown_is_the_players_most_recent_one(self):
+        """A player traded mid-season should not be listed with his old club."""
+        rows = [batting_row(g, 10, 2, team_id=7, date=f"2026-04-{g:02d}")
+                for g in range(1, 6)]
+        rows += [batting_row(g, 10, 3, team_id=9, date=f"2026-08-{g - 5:02d}")
+                 for g in range(6, 11)]
+        rows += [batting_row(g, 10, 2, team_id=9, date=f"2026-09-{g - 10:02d}")
+                 for g in range(11, 14)]
+        data = load_season(build_db(batting=rows, teams=(2, 3, 7, 9)), 2026)
+        [row] = player_opponent_deltas(data, "batting", 2, LOOSE)
+        self.assertEqual(row["team_id"], 9)
+
     def test_team_report_bundles_counts_and_rankings(self):
         batting = [batting_row(1, 10, 2, h=4, hr=3)]
         batting += [batting_row(g, 10, 3) for g in range(2, 10)]

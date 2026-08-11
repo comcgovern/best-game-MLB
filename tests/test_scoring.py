@@ -100,6 +100,12 @@ class PitchingScoreTests(unittest.TestCase):
         rough = pitch(outs=9, h=8, r=6, bb=3, so=2, hr=2)
         self.assertEqual(game_score_v2(rough), 40 + 18 + 2 - 6 - 16 - 18 - 12)
 
+    def test_game_score_v2_only_charges_unintentional_walks(self):
+        """As published, an intentional walk is not held against the pitcher."""
+        line = pitch(outs=21, so=8, h=4, r=1, bb=2, ibb=2)
+        self.assertEqual(game_score_v2(line), game_score_v2({**line, "bb": 0, "ibb": 0}))
+        self.assertLess(game_score_v2({**line, "ibb": 0}), game_score_v2(line))
+
     def test_innings_text_uses_thirds(self):
         self.assertEqual(innings_text(19), "6.1")
         self.assertEqual(innings_text(21), "7.0")

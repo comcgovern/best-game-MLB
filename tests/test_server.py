@@ -104,6 +104,16 @@ class ApiTests(unittest.TestCase):
             self.get("/static/../../../../etc/passwd")
         self.assertEqual(caught.exception.code, 404)
 
+    def test_asking_for_an_old_season_does_not_pin_later_requests(self):
+        """The cache is per-season; a stale one must not become the default."""
+        conn = db.connect(self.db_path)
+        demo.generate(conn, 2025, days=4, seed=3)
+        conn.close()
+
+        self.assertEqual(self.get_json("/api/meta")["season"], 2026)
+        self.assertEqual(self.get_json("/api/meta?season=2025")["season"], 2025)
+        self.assertEqual(self.get_json("/api/meta")["season"], 2026)
+
     def test_unknown_metric_falls_back_instead_of_failing(self):
         team_id = self.get_json("/api/meta")["teams"][0]["team_id"]
         report = self.get_json(f"/api/team?team_id={team_id}&metric=bogus")

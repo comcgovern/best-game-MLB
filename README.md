@@ -95,6 +95,12 @@ Three ways of asking the question, switchable in the UI and on the CLI:
 | `per_game` | the same, per game | who plays the biggest above themselves |
 | `rate` | per plate appearance (batters) / per nine innings (pitchers) | comparing players with unequal playing time |
 
+Two notes on `rate`. Batters are measured per PA and pitchers per nine innings,
+so the two sides are *not* comparable to each other in this mode — the tiles
+label the unit for that reason. And relievers dominate the pitching rate board:
+ten scoreless one-inning outings really is a huge runs-per-nine figure, so the
+number is right, but it is built on ten innings. `total` is the steadier read.
+
 ### Best game of the season
 
 Separately from the deltas, each qualified player's single highest-scoring game
@@ -182,7 +188,7 @@ mlbdelta/
   server.py     JSON API + static file serving
   demo.py       the fictional season
   static/       the dashboard
-tests/          60 tests, standard-library unittest
+tests/          70 tests, standard-library unittest
 ```
 
 ```bash

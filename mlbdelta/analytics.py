@@ -166,6 +166,28 @@ def _rate(score: float, workload: float) -> float:
     return score / workload if workload else 0.0
 
 
+def _best_line(lines: Iterable[Mapping]) -> dict | None:
+    """The highest-scoring line, with ties settled the same way everywhere.
+
+    Ties are common — every clean one-inning relief appearance scores exactly
+    the same — so the tie-break has to be deterministic or a player ends up
+    with several "best games of the season". The earlier game wins, and the
+    date decides it rather than the game id: MLB assigns a game_pk when the
+    game is *scheduled*, so a rained-out game replayed in September still
+    carries a low id.
+    """
+    return min(
+        lines,
+        key=lambda l: (-l["score"], l["date"], l["game_pk"]),
+        default=None,
+    )
+
+
+def _latest_line(lines: Sequence[Mapping]) -> Mapping:
+    """The most recent line — which club a player belongs to, after a trade."""
+    return max(lines, key=lambda l: (l["date"], l["game_pk"]))
+
+
 # ------------------------------------------------------------------- deltas
 
 
@@ -187,11 +209,8 @@ def player_opponent_deltas(
         for line in lines:
             by_opponent[line["opp_team_id"]].append(line)
 
-        best = max(
-            (l for l in lines if _best_game_eligible(side, l, thresholds)),
-            key=lambda l: (l["score"], -l["game_pk"]),
-            default=None,
-        )
+        eligible = [l for l in lines if _best_game_eligible(side, l, thresholds)]
+        best = _best_line(eligible)
 
         opponents = [opp_team_id] if opp_team_id is not None else list(by_opponent)
         for opponent in opponents:
@@ -214,18 +233,22 @@ def player_opponent_deltas(
             rate_vs = _rate(score_vs, workload_vs)
             rate_base = _rate(base_score, base_workload)
 
-            best_vs = max(vs_lines, key=lambda l: (l["score"], -l["game_pk"]))
-            season_best_here = bool(best and best["game_pk"] == best_vs["game_pk"]
-                                    and best["score"] == best_vs["score"])
+            # Judge the best game against this club by the same eligibility
+            # rule used for the season best, so the comparison below is fair.
+            best_vs = _best_line(
+                [l for l in vs_lines if _best_game_eligible(side, l, thresholds)]
+            ) or _best_line(vs_lines)
+            season_best_here = bool(best and best["game_pk"] == best_vs["game_pk"])
+            home_club = _latest_line(vs_lines)["team_id"]
 
             rows.append(
                 {
                     "side": side,
                     "player_id": player_id,
                     "player": data.player_name(player_id),
-                    "team_id": vs_lines[-1]["team_id"],
-                    "team": data.team_name(vs_lines[-1]["team_id"]),
-                    "team_abbrev": data.team_abbrev(vs_lines[-1]["team_id"]),
+                    "team_id": home_club,
+                    "team": data.team_name(home_club),
+                    "team_abbrev": data.team_abbrev(home_club),
                     "opp_team_id": opponent,
                     "opponent": data.team_name(opponent),
                     "opponent_abbrev": data.team_abbrev(opponent),
@@ -291,7 +314,7 @@ def best_game_attributions(
         if not eligible:
             continue
 
-        best = max(eligible, key=lambda l: (l["score"], -l["game_pk"]))
+        best = _best_line(eligible)
         runner_up = sorted((l["score"] for l in eligible), reverse=True)
         margin = best["score"] - (runner_up[1] if len(runner_up) > 1 else 0.0)
 
@@ -425,9 +448,12 @@ def player_detail(
     lines = [l for l in data.lines(side) if l["player_id"] == player_id]
     lines.sort(key=lambda l: (l["date"], l["game_pk"]))
     games = [_game_view(data, side, line) for line in lines]
-    best_score = max((g["score"] for g in games), default=None)
+
+    # Flag the one game the rest of the app calls their best, not every game
+    # that ties the top score — identical relief outings tie constantly.
+    best = _best_line(lines)
     for game in games:
-        game["is_season_best"] = game["score"] == best_score
+        game["is_season_best"] = best is not None and game["game_pk"] == best["game_pk"]
         game["is_vs_selected"] = opp_team_id is not None and game["opp_team_id"] == opp_team_id
 
     total = sum(l["score"] for l in lines)

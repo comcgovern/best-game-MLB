@@ -26,7 +26,9 @@ class SeasonCache:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self._lock = threading.Lock()
-        self._data: SeasonData | None = None
+        # Keyed by the requested season, so asking for an older season once
+        # does not leave every later default request pinned to it.
+        self._seasons: dict[int | None, SeasonData] = {}
         self._stamp: tuple[float, int] | None = None
 
     def _current_stamp(self) -> tuple[float, int]:
@@ -39,16 +41,16 @@ class SeasonCache:
     def get(self, season: int | None = None) -> SeasonData:
         with self._lock:
             stamp = self._current_stamp()
-            if self._data is None or stamp != self._stamp or (
-                season is not None and self._data.season != season
-            ):
+            if stamp != self._stamp:
+                self._seasons.clear()
+                self._stamp = stamp
+            if season not in self._seasons:
                 conn = db.connect(self.db_path)
                 try:
-                    self._data = analytics.load_season(conn, season)
+                    self._seasons[season] = analytics.load_season(conn, season)
                 finally:
                     conn.close()
-                self._stamp = stamp
-            return self._data
+            return self._seasons[season]
 
 
 def _first_int(params: dict, key: str, default=None):

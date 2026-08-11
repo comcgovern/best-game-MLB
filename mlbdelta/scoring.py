@@ -135,13 +135,15 @@ def game_score_v2(line: Mapping) -> float:
     """Tom Tango's Game Score v2 — a familiar 0-100-ish dominance scale.
 
     Starts at 40; every out is worth two points, strikeouts add one more,
-    and baserunners and runs are charged against the pitcher.
+    and baserunners and runs are charged against the pitcher. As published,
+    only unintentional walks count against him.
     """
+    unintentional_bb = max(0, line["bb"] - line.get("ibb", 0))
     return (
         40.0
         + 2 * line["outs"]
         + 1 * line["so"]
-        - 2 * line["bb"]
+        - 2 * unintentional_bb
         - 2 * line["h"]
         - 3 * line["r"]
         - 6 * line["hr"]

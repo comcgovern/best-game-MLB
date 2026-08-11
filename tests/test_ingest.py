@@ -198,6 +198,13 @@ class ScheduleParsingTests(unittest.TestCase):
                                     "detailedState": "Postponed"})
         self.assertIsNone(parse_schedule_game(entry, 2026))
 
+    def test_unplayed_games_reported_as_final_are_still_dropped(self):
+        """The API sometimes calls a postponed game abstractly "Final"."""
+        for state in ("Postponed", "Cancelled", "Suspended"):
+            entry = self._entry(status={"abstractGameState": "Final",
+                                        "detailedState": state})
+            self.assertIsNone(parse_schedule_game(entry, 2026), state)
+
     def test_completed_early_counts_as_final(self):
         entry = self._entry(status={"abstractGameState": "Final",
                                     "detailedState": "Completed Early"})
@@ -206,6 +213,86 @@ class ScheduleParsingTests(unittest.TestCase):
     def test_missing_team_is_dropped(self):
         entry = self._entry(teams={"home": {}, "away": {"team": {"id": 111}}})
         self.assertIsNone(parse_schedule_game(entry, 2026))
+
+
+class FakeClient:
+    """Stands in for StatsApiClient, serving canned payloads."""
+
+    def __init__(self, boxscores):
+        self.boxscores = boxscores
+        self.forgotten = []
+
+    def teams(self, season):
+        return [{"id": 147, "name": "New York Yankees", "abbreviation": "NYY"},
+                {"id": 111, "name": "Boston Red Sox", "abbreviation": "BOS"}]
+
+    def schedule(self, season, start_date, end_date, game_types):
+        if start_date > "2026-06-01":
+            return []
+        return [
+            {"gamePk": pk, "officialDate": "2026-06-01", "gameType": "R",
+             "season": str(season),
+             "status": {"abstractGameState": "Final", "detailedState": "Final"},
+             "teams": {"home": {"team": {"id": 147}}, "away": {"team": {"id": 111}}}}
+            for pk in self.boxscores
+        ]
+
+    def boxscore(self, game_pk):
+        return self.boxscores[game_pk]
+
+    def forget_boxscore(self, game_pk):
+        self.forgotten.append(game_pk)
+
+
+class IngestDriverTests(unittest.TestCase):
+    """The resume path: what counts as "already done" must be trustworthy."""
+
+    def setUp(self):
+        from mlbdelta.ingest import ingest_season
+
+        self.ingest_season = ingest_season
+        self.empty_box = {"teams": {
+            "home": {"team": {"id": 147}, "players": {}},
+            "away": {"team": {"id": 111}, "players": {}},
+        }}
+
+    def test_a_game_with_no_player_lines_is_not_marked_done(self):
+        conn = db.connect(":memory:")
+        client = FakeClient({777001: BOXSCORE, 777002: self.empty_box})
+        result = self.ingest_season(conn, client, 2026, workers=1,
+                                    today=datetime.date(2026, 8, 10))
+
+        self.assertEqual(result.games_ingested, 1)
+        self.assertEqual(db.ingested_game_pks(conn, 2026), {777001})
+        self.assertTrue(any("empty box score" in e for e in result.errors))
+
+    def test_an_empty_response_is_dropped_from_the_cache(self):
+        """Otherwise the cached blank makes the failure permanent."""
+        conn = db.connect(":memory:")
+        client = FakeClient({777002: self.empty_box})
+        self.ingest_season(conn, client, 2026, workers=1,
+                           today=datetime.date(2026, 8, 10))
+        self.assertEqual(client.forgotten, [777002])
+
+    def test_a_second_run_retries_what_was_never_stored(self):
+        conn = db.connect(":memory:")
+        client = FakeClient({777002: self.empty_box})
+        self.ingest_season(conn, client, 2026, workers=1,
+                           today=datetime.date(2026, 8, 10))
+
+        client.boxscores[777002] = BOXSCORE  # the API recovers
+        result = self.ingest_season(conn, client, 2026, workers=1,
+                                    today=datetime.date(2026, 8, 10))
+        self.assertEqual(result.games_ingested, 1)
+        self.assertEqual(db.ingested_game_pks(conn, 2026), {777002})
+
+    def test_limit_does_not_inflate_the_skipped_count(self):
+        conn = db.connect(":memory:")
+        client = FakeClient({777001: BOXSCORE, 777002: BOXSCORE})
+        result = self.ingest_season(conn, client, 2026, workers=1, limit=1,
+                                    today=datetime.date(2026, 8, 10))
+        self.assertEqual(result.games_ingested, 1)
+        self.assertEqual(result.games_skipped, 0, "nothing was already stored")
 
 
 class WindowTests(unittest.TestCase):

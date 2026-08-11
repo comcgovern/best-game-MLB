@@ -18,6 +18,10 @@ log = logging.getLogger(__name__)
 # Only completed games have a meaningful box score.
 FINAL_STATES = {"Final", "Completed Early", "Game Over"}
 
+# A postponed or cancelled game is sometimes reported with an abstract state of
+# "Final" even though it was never played, and its box score is empty.
+UNPLAYED_STATES = {"Postponed", "Cancelled", "Canceled", "Suspended", "Forfeit"}
+
 
 @dataclass
 class IngestResult:
@@ -153,9 +157,10 @@ def parse_boxscore(boxscore: dict, game: dict) -> tuple[list[dict], list[dict], 
 def parse_schedule_game(raw: dict, season: int) -> dict | None:
     """Normalise one schedule entry, or ``None`` if it is not a finished game."""
     status = raw.get("status") or {}
-    if status.get("abstractGameState") != "Final" and status.get(
-        "detailedState"
-    ) not in FINAL_STATES:
+    detailed = status.get("detailedState")
+    if detailed in UNPLAYED_STATES:
+        return None
+    if status.get("abstractGameState") != "Final" and detailed not in FINAL_STATES:
         return None
     teams = raw.get("teams") or {}
     home = ((teams.get("home") or {}).get("team") or {}).get("id")
@@ -210,10 +215,7 @@ def month_windows(season: int, today: datetime.date | None = None) -> Iterator[t
     today = today or datetime.date.today()
     for month in range(2, 12):
         start = datetime.date(season, month, 1)
-        if month == 12:
-            end = datetime.date(season, 12, 31)
-        else:
-            end = datetime.date(season, month + 1, 1) - datetime.timedelta(days=1)
+        end = datetime.date(season, month + 1, 1) - datetime.timedelta(days=1)
         if start > today:
             return
         yield start.isoformat(), min(end, today).isoformat()
@@ -242,15 +244,14 @@ def ingest_season(
                 scheduled[game["game_pk"]] = game
 
     known = set() if refresh else db.ingested_game_pks(conn, season)
-    todo = [game for pk, game in sorted(scheduled.items()) if pk not in known]
-    if limit is not None:
-        todo = todo[:limit]
+    outstanding = [game for pk, game in sorted(scheduled.items()) if pk not in known]
+    todo = outstanding[:limit] if limit is not None else outstanding
 
     result = IngestResult(
         season=season,
         games_scheduled=len(scheduled),
         games_ingested=0,
-        games_skipped=len(scheduled) - len(todo),
+        games_skipped=len(scheduled) - len(outstanding),
         batting_lines=0,
         pitching_lines=0,
         errors=[],
@@ -274,6 +275,16 @@ def ingest_season(
                 continue
 
             batting, pitching, players = parse_boxscore(boxscore, game)
+            if not batting and not pitching:
+                # Recording the game here would mark it done for good, because
+                # the resume check reads the games table. Leave it out so the
+                # next run retries it.
+                client.forget_boxscore(game["game_pk"])
+                result.errors.append(
+                    f"game {game['game_pk']} ({game['date']}) has an empty box score"
+                )
+                continue
+
             _insert_many(conn, "players", players)
             _insert_many(conn, "games", [game])
             result.batting_lines += _insert_many(conn, "batting_lines", batting)
